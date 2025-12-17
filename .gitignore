@@ -9,3 +9,9 @@ wheels/
 # Virtual environments
 .venv
 data
+
+# --- 测试与覆盖率 ---
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*

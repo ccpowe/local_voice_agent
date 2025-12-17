@@ -147,7 +147,7 @@ class TextToSpeech:
             logger.error(f"TTS模型加载失败: {e}")
             return False
 
-    def _calculate_speed(self, text_length: int) -> float:
+    def _calculate_speed(self, text_length: int) -> int | float:
         """
         根据文本长度动态调整语音速度
         避免长文本语音过快的问题
