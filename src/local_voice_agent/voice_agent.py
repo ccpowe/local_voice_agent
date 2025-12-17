@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 
-from .audio_utils import AudioPlayer
+from .audio_utils import AudioPlayer, AudioRecorder
 from .speech_recognition import SpeechRecognizer
 from .text_to_speech import TextToSpeech
 
@@ -17,6 +18,9 @@ from .text_to_speech import TextToSpeech
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 load_dotenv()
+
+audio_recorder = AudioRecorder(sample_rate=16000, channels=1)
+audio_player = AudioPlayer()
 
 
 # 初始化模型
@@ -122,8 +126,20 @@ async def main():
             print("\n🎤 语音输入模式")
             print("💡 操作说明: 按Enter开始录制，说话后再按Enter停止")
 
-            # 进行语音识别
-            recognized_text = speech_recognizer.record_and_transcribe()
+            audio_data = audio_recorder.record_manual()
+            file_path = None
+            if audio_data is not None:
+                debug_dir = Path.cwd() / "data" / "voice" / "audio_cache"
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                file_path = debug_dir / f"recording_{timestamp}.wav"
+                audio_recorder.save_to_wav(audio_data, str(file_path))
+
+            recognized_text = (
+                speech_recognizer.transcribe_audio_file(str(file_path))
+                if file_path is not None
+                else None
+            )
 
             if recognized_text:
                 print(f"📝 识别结果: {recognized_text}")
@@ -136,29 +152,24 @@ async def main():
         # 处理用户输入（文字或语音识别结果）
         print("AI: ", end="", flush=True)
 
-        # 收集完整的AI回复用于TTS
-        full_response = ""
-
         result = await agent.ainvoke(
             {"messages": [{"role": "user", "content": user_input}]},
             config={"configurable": {"thread_id": "1"}, "recursion_limit": 100},
         )
         Ai_response = result["messages"][-1].content
         print(Ai_response)
-        full_response = Ai_response
         print()  # 在回答结束后换行
 
         # 如果启用了TTS，将AI回复转为语音
-        if TTS_AVAILABLE and tts_enabled and full_response.strip():
+        if TTS_AVAILABLE and tts_enabled and Ai_response.strip():
             print("🔊 正在生成语音回复...")
             try:
                 if tts_synthesizer:
                     audio_file = tts_synthesizer.synthesize_long_text(
-                        full_response.strip()
+                        Ai_response.strip()
                     )
                     if audio_file:
                         print(f"🎵 语音回复已生成: {audio_file}")
-                        audio_player = AudioPlayer()
                         audio_player.play_wav_file(audio_file)
                     else:
                         print("❌ 语音生成失败")

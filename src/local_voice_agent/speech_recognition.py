@@ -1,20 +1,11 @@
-"""
-语音识别模块 - 基于faster-whisper
-"""
+"""语音识别模块 - 基于faster-whisper"""
 
-import datetime
 import logging
-import tempfile
-import wave
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
-import sounddevice as sd
 from faster_whisper import WhisperModel
 from zhconv import convert  # 处理繁体简体转换
-
-from .audio_utils import AudioRecorder
 
 WHISPER_CONFIG = {
     "model_size": "small",
@@ -60,12 +51,6 @@ class SpeechRecognizer:
         )
         self.language = language or WHISPER_CONFIG.get("language", "zh")
         self.model = None
-
-        # 初始化音频录制器，使用配置参数
-        self.audio_recorder = AudioRecorder(
-            sample_rate=AUDIO_CONFIG.get("sample_rate", 16000),
-            channels=AUDIO_CONFIG.get("channels", 1),
-        )
 
         # 模型下载路径
         base_cache_dir = (
@@ -118,149 +103,6 @@ class SpeechRecognizer:
             logger.error(f"模型加载失败: {e}")
             return False
 
-    def transcribe_audio_data(
-        self, audio_data: np.ndarray, sample_rate: int = 16000
-    ) -> Optional[str]:
-        """
-        转录音频数据
-
-        Args:
-            audio_data: 音频数据 (numpy array)
-            sample_rate: 采样率
-
-        Returns:
-            识别的文本，失败返回None
-        """
-        if self.model is None:
-            if not self.load_model():
-                return None
-
-        try:
-            # 将音频数据保存为临时文件
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_filename = temp_file.name
-                self.audio_recorder.save_to_wav(audio_data, temp_filename)
-
-            # 使用faster-whisper进行转录
-            segments, info = self.model.transcribe(
-                temp_filename,
-                language=self.language,
-                beam_size=5,
-                best_of=5,
-                temperature=0.0,
-                condition_on_previous_text=False,
-            )
-
-            # 合并所有段落的文本
-            full_text = ""
-            for segment in segments:
-                full_text += segment.text
-
-            # 清理临时文件
-            Path(temp_filename).unlink(missing_ok=True)
-
-            # 清理文本并进行繁简转换
-            text = full_text.strip()
-            if text:
-                # 进行繁简转换
-                simplified_text = self._convert_to_simplified(text)
-                logger.info(f"识别结果: {simplified_text}")
-                return simplified_text
-            else:
-                logger.warning("未识别到有效文本")
-                return None
-
-        except Exception as e:
-            logger.error(f"语音识别失败: {e}")
-            return None
-
-    def record_and_transcribe(self) -> Optional[str]:
-        """
-        录制音频并进行语音识别 - 使用手动控制模式
-
-        Returns:
-            识别的文本，失败返回None
-        """
-        try:
-            print("🎤 准备开始录制...")
-            input("按 Enter 开始录制: ")
-
-            print("🔴 录制中... 按 Enter 停止录制")
-
-            # 录制参数
-            sample_rate = 16000
-            channels = 1
-            recording = True
-            audio_data = []
-
-            def audio_callback(indata, frames, time, status):
-                if recording:
-                    audio_data.append(indata.copy())
-
-            # 开始录制流
-            with sd.InputStream(
-                samplerate=sample_rate,
-                channels=channels,
-                callback=audio_callback,
-                dtype=np.float32,
-            ):
-                input()  # 等待用户按Enter停止
-
-            recording = False
-            print("⏹️ 录制停止!")
-
-            if not audio_data:
-                logger.warning("未录制到音频数据")
-                return None
-
-            # 合并音频数据并转换格式
-            audio_float = np.concatenate(audio_data, axis=0)
-            audio_int16 = (audio_float * 32767).astype(np.int16).flatten()
-
-            duration = len(audio_int16) / sample_rate
-            logger.info(f"录制完成，音频长度: {duration:.2f}秒")
-
-            # 保存录音文件用于调试
-
-            debug_dir = Path.cwd() / "data" / "voice" / "audio_cache"
-            debug_dir.mkdir(parents=True, exist_ok=True)
-
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            debug_filename = debug_dir / f"recording_{timestamp}.wav"
-
-            try:
-                # 添加调试信息
-                logger.info(
-                    f"音频数据类型: {audio_int16.dtype}, 形状: {audio_int16.shape}, 范围: [{audio_int16.min()}, {audio_int16.max()}]"
-                )
-
-                with wave.open(debug_filename, "wb") as wf:
-                    wf.setnchannels(channels)
-                    wf.setsampwidth(2)  # 16-bit
-                    wf.setframerate(sample_rate)
-                    wf.writeframes(audio_int16.tobytes())
-
-                logger.info(f"🎵 录音已保存到: {debug_filename}")
-
-                # 验证保存的文件大小
-                file_size = debug_filename.stat().st_size
-                logger.info(f"📁 文件大小: {file_size} 字节")
-            except Exception as e:
-                logger.warning(f"保存录音文件失败: {e}")
-                import traceback
-
-                logger.warning(f"详细错误: {traceback.format_exc()}")
-
-            # 进行语音识别
-            return self.transcribe_audio_data(audio_int16, sample_rate)
-
-        except Exception as e:
-            logger.error(f"录制和识别失败: {e}")
-            import traceback
-
-            logger.error(f"详细错误: {traceback.format_exc()}")
-            return None
-
     def transcribe_audio_file(self, audio_file_path: str) -> Optional[str]:
         """
         转录音频文件
@@ -271,56 +113,51 @@ class SpeechRecognizer:
         Returns:
             识别的文本，失败返回None
         """
-        try:
-            # 确保模型已加载
-            if self.model is None:
-                if not self.load_model():
-                    return None
 
-            if self.model is None:
-                logger.error("模型加载失败，无法进行转录")
+        # 确保模型已加载
+        if self.model is None:
+            if not self.load_model():
                 return None
+        if self.model is None:
+            logger.error("模型未加载，无法进行转录")
+            return None
 
-            # 直接使用Whisper处理音频文件，支持多种格式
-            segments, info = self.model.transcribe(
-                audio_file_path,
-                language=self.language,
-                beam_size=5,
-                best_of=5,
-                temperature=0.0,
-                condition_on_previous_text=False,
+        # 直接使用Whisper处理音频文件，支持多种格式
+        segments, info = self.model.transcribe(
+            audio_file_path,
+            language=self.language,
+            beam_size=5,
+            best_of=5,
+            temperature=0.0,
+            condition_on_previous_text=False,
+        )
+
+        # 记录语言检测信息
+        logger.info(
+            f"检测到语言: {info.language} (置信度: {info.language_probability:.2f})"
+        )
+
+        # 合并所有段落的文本
+        full_text = ""
+        segment_count = 0
+        for segment in segments:
+            full_text += segment.text
+            segment_count += 1
+            logger.debug(
+                f"段落 {segment_count}: [{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}"
             )
 
-            # 记录语言检测信息
-            logger.info(
-                f"检测到语言: {info.language} (置信度: {info.language_probability:.2f})"
-            )
+        logger.info(f"转录完成，共 {segment_count} 个段落")
 
-            # 合并所有段落的文本
-            full_text = ""
-            segment_count = 0
-            for segment in segments:
-                full_text += segment.text
-                segment_count += 1
-                logger.debug(
-                    f"段落 {segment_count}: [{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}"
-                )
-
-            logger.info(f"转录完成，共 {segment_count} 个段落")
-
-            # 清理文本并进行繁简转换
-            text = full_text.strip()
-            if text:
-                # 进行繁简转换
-                simplified_text = self._convert_to_simplified(text)
-                logger.info(f"识别结果: {simplified_text}")
-                return simplified_text
-            else:
-                logger.warning("未识别到有效文本")
-                return None
-
-        except Exception as e:
-            logger.error(f"音频文件转录失败: {e}")
+        # 清理文本并进行繁简转换
+        text = full_text.strip()
+        if text:
+            # 进行繁简转换
+            simplified_text = self._convert_to_simplified(text)
+            logger.info(f"识别结果: {simplified_text}")
+            return simplified_text
+        else:
+            logger.warning("未识别到有效文本")
             return None
 
     def __del__(self):

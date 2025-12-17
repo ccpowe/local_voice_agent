@@ -3,10 +3,14 @@
 """
 
 import io
+import logging
 import wave
+from typing import Optional
 
 import numpy as np
 import sounddevice as sd
+
+logger = logging.getLogger(__name__)
 
 
 class AudioRecorder:
@@ -45,6 +49,44 @@ class AudioRecorder:
             wf.setframerate(self.sample_rate)
             wf.writeframes(audio_data.tobytes())
         return buffer.getvalue()
+
+    def record_manual(self) -> Optional[np.ndarray]:
+        """
+        手动控制录音：按 Enter 开始，再按 Enter 停止。
+
+        Returns:
+            一维 int16 音频数据；未录到音频则返回 None
+        """
+        print("🎤 准备开始录制...")
+        input("按 Enter 开始录制: ")
+
+        print("🔴 录制中... 按 Enter 停止录制")
+
+        recording = True
+        audio_chunks: list[np.ndarray] = []
+
+        def audio_callback(indata, frames, time, status):
+            if recording:
+                audio_chunks.append(indata.copy())
+
+        with sd.InputStream(
+            samplerate=self.sample_rate,
+            channels=self.channels,
+            callback=audio_callback,
+            dtype=np.float32,
+        ):
+            input()
+
+        recording = False
+        print("⏹️ 录制停止!")
+
+        if not audio_chunks:
+            logger.warning("未录制到音频数据")
+            return None
+
+        audio_float = np.concatenate(audio_chunks, axis=0)
+        audio_int16 = (audio_float * 32767).astype(np.int16).flatten()
+        return audio_int16
 
 
 class AudioPlayer:
