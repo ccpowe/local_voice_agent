@@ -2,6 +2,7 @@
 语音识别模块 - 基于faster-whisper
 """
 
+import datetime
 import logging
 import tempfile
 import wave
@@ -9,20 +10,11 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import torch
+import sounddevice as sd
 from faster_whisper import WhisperModel
+from zhconv import convert  # 处理繁体简体转换
 
 from .audio_utils import AudioRecorder
-
-# 尝试导入繁简转换库
-try:
-    from zhconv import convert
-
-    ZHCONV_AVAILABLE = True
-except ImportError:
-    ZHCONV_AVAILABLE = False
-    logging.warning("zhconv库未安装，无法进行繁简转换")
-
 
 WHISPER_CONFIG = {
     "model_size": "small",
@@ -94,8 +86,6 @@ class SpeechRecognizer:
         Returns:
             简体中文文本
         """
-        if not ZHCONV_AVAILABLE or not text:
-            return text
 
         try:
             # 使用zhconv进行繁简转换
@@ -112,12 +102,7 @@ class SpeechRecognizer:
         try:
             logger.info(f"正在加载Whisper模型: {self.model_size}")
 
-            # 如果设备是auto，自动选择
-            if self.device == "auto":
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                logger.info(f"自动选择设备: {device}")
-            else:
-                device = self.device
+            device = self.device
 
             self.model = WhisperModel(
                 model_size_or_path=self.model_size,
@@ -197,9 +182,6 @@ class SpeechRecognizer:
             识别的文本，失败返回None
         """
         try:
-            import numpy as np
-            import sounddevice as sd
-
             print("🎤 准备开始录制...")
             input("按 Enter 开始录制: ")
 
@@ -239,9 +221,8 @@ class SpeechRecognizer:
             logger.info(f"录制完成，音频长度: {duration:.2f}秒")
 
             # 保存录音文件用于调试
-            import datetime
 
-            debug_dir = Path.cwd() / "data" / "voice" / "debug_recordings"
+            debug_dir = Path.cwd() / "data" / "voice" / "audio_cache"
             debug_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

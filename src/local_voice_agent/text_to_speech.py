@@ -38,7 +38,6 @@ class TextToSpeech:
         speed: Optional[float] = None,
         device: Optional[str] = None,
         model_cache_dir: Optional[str] = None,
-        tts_cache_dir: Optional[str] = None,
         output_dir: Optional[str] = None,
     ):
         """
@@ -49,7 +48,6 @@ class TextToSpeech:
             speed: 语音速度倍率
             device: 设备类型 ("cpu", "cuda", "auto")
             model_cache_dir: 指定模型目录（HuggingFace Hub 缓存/下载目录）；不指定则使用 HuggingFace 默认缓存目录
-            tts_cache_dir: TTS 合成过程中的中间音频缓存目录（可选）
             output_dir: 指定输出目录（默认: ./data/voice/tts_out）
         """
 
@@ -62,7 +60,6 @@ class TextToSpeech:
         self.model_cache_dir = (
             str(Path(model_cache_dir).resolve()) if model_cache_dir else None
         )
-        self.tts_cache_dir = Path(tts_cache_dir).resolve() if tts_cache_dir else None
 
         # 输出目录
         resolved_output_dir = (
@@ -72,9 +69,6 @@ class TextToSpeech:
         )
         self.output_dir = resolved_output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        if self.tts_cache_dir:
-            self.tts_cache_dir.mkdir(parents=True, exist_ok=True)
 
         # 初始化模型和管道
         self.model = None
@@ -284,11 +278,6 @@ class TextToSpeech:
 
             audio_segments = []
             silence_samples = int(self.silence_duration * self.sample_rate)
-            cache_paths: list[Path] = []
-
-            import time
-
-            cache_prefix = f"tts_seg_{int(time.time())}"
 
             for i, paragraph in enumerate(processed_paragraphs):
                 logger.info(
@@ -302,11 +291,6 @@ class TextToSpeech:
                 generator = self.zh_pipeline(paragraph, voice=self.voice, speed=speed)
                 result = next(generator)
                 audio_data = result.audio
-
-                if self.tts_cache_dir:
-                    seg_path = self.tts_cache_dir / f"{cache_prefix}_{i:03d}.wav"
-                    sf.write(str(seg_path), audio_data, self.sample_rate)
-                    cache_paths.append(seg_path)
 
                 # 添加段落间的静音（除了第一段）
                 if i > 0 and silence_samples > 0:

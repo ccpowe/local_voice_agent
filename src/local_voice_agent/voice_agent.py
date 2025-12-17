@@ -36,7 +36,6 @@ agent = create_agent(model, tools=[], system_prompt="健康助手小v")
 DATA_DIR = Path.cwd() / "data"
 MODEL_DIR = DATA_DIR / "model"
 VOICE_DIR = DATA_DIR / "voice"
-TTS_CACHE_DIR = VOICE_DIR / "tts_cache"
 TTS_OUT_DIR = VOICE_DIR / "tts_out"
 
 # 初始化语音识别器
@@ -63,7 +62,6 @@ try:
         speed=1.0,  # 语音速度
         device="auto",  # 自动选择设备
         model_cache_dir=str(MODEL_DIR),
-        tts_cache_dir=str(TTS_CACHE_DIR),
         output_dir=str(TTS_OUT_DIR),
     )
     # 立即加载TTS模型
