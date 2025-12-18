@@ -5,27 +5,27 @@
 import logging
 import os
 import re
+import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Final, List, Optional
 
 import numpy as np
 import soundfile as sf
 import torch
 from kokoro import KModel, KPipeline
 
-TTS_CONFIG = {
-    "model_repo_id": "hexgrad/Kokoro-82M-v1.1-zh",
-    "sample_rate": 24000,
-    "voice": "zf_001",
-    "speed": 1.0,
-    "device": "auto",
-    "silence_duration": 0.2,
-}
+DEFAULT_MODEL_REPO_ID: Final[str] = "hexgrad/Kokoro-82M-v1.1-zh"
+DEFAULT_SAMPLE_RATE: Final[int] = 24000
+DEFAULT_VOICE: Final[str] = "zf_001"
+DEFAULT_SPEED: Final[float] = 1.0
+DEFAULT_DEVICE: Final[str] = "auto"
+DEFAULT_SILENCE_DURATION: Final[float] = 0.2
+
 PATH_CONFIG = {"tts_output_dir": Path.cwd() / "data" / "voice" / "tts_out"}
-LOG_CONFIG = {"level": "INFO"}
+LOG_LEVEL_NAME: Final[str] = "INFO"
 
 # 配置日志
-logging.basicConfig(level=getattr(logging, LOG_CONFIG.get("level", "INFO")))
+logging.basicConfig(level=getattr(logging, LOG_LEVEL_NAME))
 logger = logging.getLogger(__name__)
 
 
@@ -51,14 +51,19 @@ class TextToSpeech:
             output_dir: 指定输出目录（默认: ./data/voice/tts_out）
         """
 
-        self.voice = voice or TTS_CONFIG.get("voice", "zf_001")
-        self.speed = speed or TTS_CONFIG.get("speed", 1.0)
-        self.device = device or TTS_CONFIG.get("device", "auto")
-        self.sample_rate = TTS_CONFIG.get("sample_rate", 24000)
-        self.silence_duration = TTS_CONFIG.get("silence_duration", 0.2)
-        self.repo_id = TTS_CONFIG.get("model_repo_id", "hexgrad/Kokoro-82M-v1.1-zh")
+        self.voice: str = voice if voice is not None else DEFAULT_VOICE
+        self.speed: float = float(speed) if speed is not None else DEFAULT_SPEED
+        self.device: str = device if device is not None else DEFAULT_DEVICE
+        self.sample_rate: int = DEFAULT_SAMPLE_RATE
+        self.silence_duration: float = DEFAULT_SILENCE_DURATION
+        self.repo_id: str = DEFAULT_MODEL_REPO_ID
         self.model_cache_dir = (
             str(Path(model_cache_dir).resolve()) if model_cache_dir else None
+        )
+        self._local_model_dir: Path | None = (
+            Path(self.model_cache_dir) / "kokoro" / self.repo_id.replace("/", "--")
+            if self.model_cache_dir
+            else None
         )
 
         # 输出目录
@@ -71,9 +76,9 @@ class TextToSpeech:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # 初始化模型和管道
-        self.model = None
-        self.zh_pipeline = None
-        self.en_pipeline = None
+        self.model: KModel | None = None
+        self.zh_pipeline: KPipeline | None = None
+        self.en_pipeline: KPipeline | None = None
 
         logger.info(
             f"初始化TTS: 语音={self.voice}, 速度={self.speed}, 设备={self.device}"
@@ -82,29 +87,31 @@ class TextToSpeech:
         # 可选：指定本地缓存目录（不指定则走 HuggingFace 默认缓存目录）
         self._setup_model_cache()
 
+    def _resolve_device(self) -> torch.device:
+        if self.device == "auto":
+            device_str = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            device_str = self.device
+        return torch.device(device_str)
+
     def _setup_model_cache(self):
-        """配置 HuggingFace 缓存目录（可选）"""
+        """配置本地模型目录（可选）"""
         if not self.model_cache_dir:
-            logger.info("未指定 model_cache_dir，将使用 HuggingFace 默认缓存目录")
+            logger.info("未指定 model_cache_dir，将使用 Kokoro/HuggingFace 默认缓存目录")
             return
 
         Path(self.model_cache_dir).mkdir(parents=True, exist_ok=True)
-
-        # 指定缓存目录后，KModel/KPipeline 下载的文件会进入该目录（命中缓存则不会重复下载）
-        os.environ["HF_HOME"] = self.model_cache_dir
-        os.environ["TRANSFORMERS_CACHE"] = self.model_cache_dir
-        os.environ["HUGGINGFACE_HUB_CACHE"] = self.model_cache_dir
-
-        # 注意：这里不强制离线；如需离线模式由用户自行设置 HF_HUB_OFFLINE=1
         logger.info(f"使用指定的模型/缓存目录: {self.model_cache_dir}")
 
-    def _setup_device(self):
-        """设置设备"""
-        if self.device == "auto":
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"自动选择设备: {device}")
-            return device
-        return self.device
+    def _resolve_voice_arg(self, voice: str) -> str:
+        if voice.endswith(".pt") or os.path.exists(voice):
+            return voice
+        local_model_dir = self._local_model_dir
+        if local_model_dir is not None:
+            local_voice_path = local_model_dir / "voices" / f"{voice}.pt"
+            if local_voice_path.exists():
+                return str(local_voice_path)
+        return voice
 
     def _load_models(self) -> bool:
         """加载TTS模型"""
@@ -114,10 +121,32 @@ class TextToSpeech:
 
             logger.info(f"正在加载Kokoro TTS模型: {self.repo_id}")
 
-            device = self._setup_device()
+            device = self._resolve_device()
 
-            # 始终通过 HuggingFace 缓存加载（如指定了 model_cache_dir，则缓存/下载到该目录）
-            self.model = KModel(repo_id=self.repo_id).to(device).eval()
+            config_path: str | None = None
+            model_path: str | None = None
+            local_model_dir = self._local_model_dir
+            if local_model_dir is not None:
+                local_config = local_model_dir / "config.json"
+                model_name = KModel.MODEL_NAMES.get(self.repo_id)
+                local_model = (local_model_dir / model_name) if model_name else None
+                if (
+                    local_config.exists()
+                    and local_model is not None
+                    and local_model.exists()
+                ):
+                    config_path = str(local_config)
+                    model_path = str(local_model)
+                    logger.info(f"从本地目录加载 Kokoro 模型文件: {local_model_dir}")
+
+            if config_path and model_path:
+                self.model = (
+                    KModel(repo_id=self.repo_id, config=config_path, model=model_path)
+                    .to(device)
+                    .eval()
+                )
+            else:
+                self.model = KModel(repo_id=self.repo_id).to(device).eval()
 
             logger.info(f"模型加载成功: {self.repo_id}")
 
@@ -127,11 +156,14 @@ class TextToSpeech:
             )
 
             # 中文管道
-            def en_callable(text):
+            def en_callable(text: str) -> str:
                 """处理英文单词的发音"""
                 if text.lower() == "kokoro":
                     return "kˈOkəɹO"
-                return next(self.en_pipeline(text)).phonemes
+                en_pipeline = self.en_pipeline
+                if en_pipeline is None:
+                    raise RuntimeError("English pipeline is not initialized")
+                return next(en_pipeline(text)).phonemes
 
             self.zh_pipeline = KPipeline(
                 lang_code="z",
@@ -147,7 +179,7 @@ class TextToSpeech:
             logger.error(f"TTS模型加载失败: {e}")
             return False
 
-    def _calculate_speed(self, text_length: int) -> int | float:
+    def _calculate_speed(self, text_length: int) -> float:
         """
         根据文本长度动态调整语音速度
         避免长文本语音过快的问题
@@ -188,6 +220,23 @@ class TextToSpeech:
 
         return text
 
+    def _save_audio_file(
+        self, output_file: Optional[str], audio_data: np.ndarray
+    ) -> str:
+        # 生成输出文件路径 （似乎能提取成一个）
+        if output_file is None:
+            timestamp = int(time.time())
+            output_path = self.output_dir / f"tts_output_{timestamp}.wav"
+        else:
+            # 确保输出目录存在
+            output_path = Path(output_file).resolve()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 保存音频文件
+        sf.write(str(output_path), audio_data, self.sample_rate)
+        logger.info(f"语音合成完成: {output_path}")
+        return str(output_path)
+
     def synthesize_text(
         self, text: str, output_file: Optional[str] = None
     ) -> Optional[str]:
@@ -201,13 +250,11 @@ class TextToSpeech:
         Returns:
             生成的音频文件路径，失败返回None
         """
-        if not self._load_models():
-            return None
-
         try:
-            # 预处理文本，去除换行符
-            processed_text = self._preprocess_text(text)
+            if not self._load_models():
+                return None
 
+            processed_text = self._preprocess_text(text)
             if not processed_text.strip():
                 logger.warning("输入文本为空")
                 return None
@@ -218,26 +265,15 @@ class TextToSpeech:
             speed = self._calculate_speed(len(processed_text))
 
             # 生成语音
-            generator = self.zh_pipeline(processed_text, voice=self.voice, speed=speed)
+            zh_pipeline = self.zh_pipeline
+            if zh_pipeline is None:
+                raise RuntimeError("Chinese pipeline is not initialized")
+            voice_arg = self._resolve_voice_arg(self.voice)
+            generator = zh_pipeline(processed_text, voice=voice_arg, speed=speed)
             result = next(generator)
             audio_data = result.audio
-
-            # 生成输出文件路径
-            if output_file is None:
-                import time
-
-                timestamp = int(time.time())
-                output_path = self.output_dir / f"tts_output_{timestamp}.wav"
-            else:
-                # 确保输出目录存在
-                output_path = Path(output_file).resolve()
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # 保存音频文件
-            sf.write(str(output_path), audio_data, self.sample_rate)
-
-            logger.info(f"语音合成完成: {output_path}")
-            return str(output_path)
+            audio_output_path = self._save_audio_file(output_file, audio_data)
+            return audio_output_path
 
         except Exception as e:
             logger.error(f"语音合成失败: {e}")
@@ -256,10 +292,11 @@ class TextToSpeech:
         Returns:
             生成的音频文件路径，失败返回None
         """
-        if not self._load_models():
-            return None
 
         try:
+            if not self._load_models():
+                return None
+
             if not paragraphs or all(not p.strip() for p in paragraphs):
                 logger.warning("输入段落为空")
                 return None
@@ -276,7 +313,11 @@ class TextToSpeech:
                 logger.warning("预处理后没有有效的段落")
                 return None
 
-            audio_segments = []
+            zh_pipeline = self.zh_pipeline
+            if zh_pipeline is None:
+                raise RuntimeError("Chinese pipeline is not initialized")
+
+            audio_segments: list[np.ndarray] = []
             silence_samples = int(self.silence_duration * self.sample_rate)
 
             for i, paragraph in enumerate(processed_paragraphs):
@@ -288,7 +329,8 @@ class TextToSpeech:
                 speed = self._calculate_speed(len(paragraph))
 
                 # 生成当前段落的语音
-                generator = self.zh_pipeline(paragraph, voice=self.voice, speed=speed)
+                voice_arg = self._resolve_voice_arg(self.voice)
+                generator = zh_pipeline(paragraph, voice=voice_arg, speed=speed)
                 result = next(generator)
                 audio_data = result.audio
 
@@ -302,24 +344,8 @@ class TextToSpeech:
             # 合并所有音频段
             if audio_segments:
                 combined_audio = np.concatenate(audio_segments)
-
-                # 生成输出文件路径
-                if output_file is None:
-                    import time
-
-                    timestamp = int(time.time())
-                    output_path = self.output_dir / f"tts_paragraphs_{timestamp}.wav"
-                else:
-                    output_path = Path(output_file).resolve()
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-                # 保存合并的音频文件
-                sf.write(str(output_path), combined_audio, self.sample_rate)
-
-                logger.info(
-                    f"多段落语音合成完成: {output_path} (共 {len(audio_segments)} 段)"
-                )
-                return str(output_path)
+                audio_output_path = self._save_audio_file(output_file, combined_audio)
+                return audio_output_path
             else:
                 logger.warning("没有生成任何音频内容")
                 return None
@@ -381,8 +407,6 @@ class TextToSpeech:
         """
         if len(text) <= max_chars:
             return [text]
-
-        import re
 
         # 按句子结束符分割
         sentences = re.split(r"([。！？\.\!\?])", text)
@@ -450,6 +474,14 @@ class TextToSpeech:
         """
         # 兼容：如果用户把 voices 以平铺方式放到 model_cache_dir/voices 下，则从本地枚举
         if self.model_cache_dir:
+            local_model_dir = self._local_model_dir
+            if local_model_dir is not None:
+                local_voices_dir = local_model_dir / "voices"
+                if local_voices_dir.exists():
+                    voices = [p.stem for p in local_voices_dir.glob("*.pt")]
+                    if voices:
+                        return sorted(voices)
+
             local_voices_dir = Path(self.model_cache_dir) / "voices"
             if local_voices_dir.exists():
                 voices = [p.stem for p in local_voices_dir.glob("*.pt")]

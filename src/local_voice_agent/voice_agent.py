@@ -34,7 +34,7 @@ model = ChatOpenAI(
 # 初始化检查点
 checkpoint = InMemorySaver()
 
-agent = create_agent(model, tools=[], system_prompt="健康助手小v")
+agent = create_agent(model=model, tools=[], system_prompt="健康助手小v")
 
 # 统一数据目录
 DATA_DIR = Path.cwd() / "data"
@@ -98,7 +98,7 @@ async def main():
     # TTS状态控制
     tts_enabled = False
 
-    while user_input.lower() != "再见":
+    while user_input.lower() != "exit":
         # 检查TTS控制命令
         if TTS_AVAILABLE and user_input.lower() == "tts:on":
             tts_enabled = True
@@ -153,7 +153,7 @@ async def main():
         print("AI: ", end="", flush=True)
 
         result = await agent.ainvoke(
-            {"messages": [{"role": "user", "content": user_input}]},
+            {"messages": [{"role": "human", "content": user_input}]},
             config={"configurable": {"thread_id": "1"}, "recursion_limit": 100},
         )
         Ai_response = result["messages"][-1].content
