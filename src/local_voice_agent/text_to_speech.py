@@ -3,7 +3,6 @@
 """
 
 import logging
-import os
 import re
 import time
 from pathlib import Path
@@ -47,17 +46,16 @@ class TextToSpeech:
             voice: 语音模型 (zf_xxx表示女声, zm_xxx表示男声)
             speed: 语音速度倍率
             device: 设备类型 ("cpu", "cuda", "auto")
-            model_cache_dir: 指定模型目录（HuggingFace Hub 缓存/下载目录）；不指定则使用 HuggingFace 默认缓存目录
+            model_cache_dir: 指定本地模型根目录（例如 `data/model`），内部按 `kokoro/<repo>/...` 组织；不指定则使用 Kokoro/HuggingFace 默认缓存目录
             output_dir: 指定输出目录（默认: ./data/voice/tts_out）
         """
 
-        self.voice: str = voice if voice is not None else DEFAULT_VOICE
         self.speed: float = float(speed) if speed is not None else DEFAULT_SPEED
         self.device: str = device if device is not None else DEFAULT_DEVICE
         self.sample_rate: int = DEFAULT_SAMPLE_RATE
         self.silence_duration: float = DEFAULT_SILENCE_DURATION
         self.repo_id: str = DEFAULT_MODEL_REPO_ID
-        self.model_cache_dir = (
+        self.model_cache_dir: str | None = (
             str(Path(model_cache_dir).resolve()) if model_cache_dir else None
         )
         self._local_model_dir: Path | None = (
@@ -65,6 +63,8 @@ class TextToSpeech:
             if self.model_cache_dir
             else None
         )
+        self.voice: str = voice if voice is not None else DEFAULT_VOICE
+        self._resolve_voice()
 
         # 输出目录
         resolved_output_dir = (
@@ -84,8 +84,9 @@ class TextToSpeech:
             f"初始化TTS: 语音={self.voice}, 速度={self.speed}, 设备={self.device}"
         )
 
-        # 可选：指定本地缓存目录（不指定则走 HuggingFace 默认缓存目录）
-        self._setup_model_cache()
+        if self.model_cache_dir:
+            Path(self.model_cache_dir).mkdir(parents=True, exist_ok=True)
+            logger.info(f"使用指定的模型/缓存目录: {self.model_cache_dir}")
 
     def _resolve_device(self) -> torch.device:
         if self.device == "auto":
@@ -94,24 +95,15 @@ class TextToSpeech:
             device_str = self.device
         return torch.device(device_str)
 
-    def _setup_model_cache(self):
-        """配置本地模型目录（可选）"""
-        if not self.model_cache_dir:
-            logger.info("未指定 model_cache_dir，将使用 Kokoro/HuggingFace 默认缓存目录")
+    def _resolve_voice(self) -> None:
+        if Path(self.voice).exists() or self.voice.endswith(".pt"):
             return
-
-        Path(self.model_cache_dir).mkdir(parents=True, exist_ok=True)
-        logger.info(f"使用指定的模型/缓存目录: {self.model_cache_dir}")
-
-    def _resolve_voice_arg(self, voice: str) -> str:
-        if voice.endswith(".pt") or os.path.exists(voice):
-            return voice
         local_model_dir = self._local_model_dir
         if local_model_dir is not None:
-            local_voice_path = local_model_dir / "voices" / f"{voice}.pt"
+            local_voice_path = local_model_dir / "voices" / f"{self.voice}.pt"
             if local_voice_path.exists():
-                return str(local_voice_path)
-        return voice
+                self.voice = str(local_voice_path)
+                return
 
     def _load_models(self) -> bool:
         """加载TTS模型"""
@@ -268,8 +260,7 @@ class TextToSpeech:
             zh_pipeline = self.zh_pipeline
             if zh_pipeline is None:
                 raise RuntimeError("Chinese pipeline is not initialized")
-            voice_arg = self._resolve_voice_arg(self.voice)
-            generator = zh_pipeline(processed_text, voice=voice_arg, speed=speed)
+            generator = zh_pipeline(processed_text, voice=self.voice, speed=speed)
             result = next(generator)
             audio_data = result.audio
             audio_output_path = self._save_audio_file(output_file, audio_data)
@@ -329,8 +320,7 @@ class TextToSpeech:
                 speed = self._calculate_speed(len(paragraph))
 
                 # 生成当前段落的语音
-                voice_arg = self._resolve_voice_arg(self.voice)
-                generator = zh_pipeline(paragraph, voice=voice_arg, speed=speed)
+                generator = zh_pipeline(paragraph, voice=self.voice, speed=speed)
                 result = next(generator)
                 audio_data = result.audio
 
@@ -472,17 +462,9 @@ class TextToSpeech:
         Returns:
             语音名称列表
         """
-        # 兼容：如果用户把 voices 以平铺方式放到 model_cache_dir/voices 下，则从本地枚举
-        if self.model_cache_dir:
-            local_model_dir = self._local_model_dir
-            if local_model_dir is not None:
-                local_voices_dir = local_model_dir / "voices"
-                if local_voices_dir.exists():
-                    voices = [p.stem for p in local_voices_dir.glob("*.pt")]
-                    if voices:
-                        return sorted(voices)
-
-            local_voices_dir = Path(self.model_cache_dir) / "voices"
+        local_model_dir = self._local_model_dir
+        if local_model_dir is not None:
+            local_voices_dir = local_model_dir / "voices"
             if local_voices_dir.exists():
                 voices = [p.stem for p in local_voices_dir.glob("*.pt")]
                 if voices:
@@ -515,9 +497,15 @@ class TextToSpeech:
         Returns:
             设置是否成功
         """
+        if Path(voice).exists():
+            self.voice = str(Path(voice).resolve())
+            logger.info(f"语音已切换到: {self.voice}")
+            return True
+
         available_voices = self.get_available_voices()
         if voice in available_voices:
             self.voice = voice
+            self._resolve_voice()
             logger.info(f"语音已切换到: {voice}")
             return True
         else:
