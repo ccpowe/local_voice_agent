@@ -15,3 +15,6 @@ data
 htmlcov/
 .coverage
 .coverage.*
+
+.env
+.env.local.bak
