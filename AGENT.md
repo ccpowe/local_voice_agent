@@ -1,14 +1,15 @@
-# python312,313.rule
-# 强制执行现代 Python 3.12+ 3.13+ 最佳实践的规则。
+# python312.rule
+# 强制执行现代 Python 3.12+ 最佳实践的规则。
 # 适用于项目中的所有 Python 文件 (*.py)。
 #
 # 涵盖的准则：
 # - 语法：Match-case, 海象运算符 (:=), 泛型集合 (list/dict), 联合类型 (|)。
 # - 结构：拒绝嵌套 (Never Nester), 结构化并发 (Asyncio TaskGroup)。
 # - 类型：强静态类型, 禁止行内忽略, Pydantic v2 原生验证。
+# - 配置：使用 Pydantic Settings 进行强类型配置管理。
 # - 工具：Pathlib, uv 包管理。
 
-description: "现代 Python 3.12+ 3.13+ 编码最佳实践、异步并发规范及风格指南。"
+description: "现代 Python 3.12+ 编码最佳实践、异步并发规范及风格指南。"
 files: "**/*.py"
 
 guidelines:
@@ -68,6 +69,28 @@ guidelines:
       优先使用 Pydantic v2 的原生验证 (`model_validate`, `field_validator`, `computed_field`)。
       避免手动编写转换逻辑或自定义 `from_sdk` 方法。让 Pydantic 处理所有的数据清洗工作。
 
+  - title: "类型安全配置 (Type-Safe Settings)"
+    description: >
+      使用 `pydantic-settings` 管理环境变量，严禁使用 `os.getenv` 或 `python-dotenv`。
+      通过定义继承自 `BaseSettings` 的类来自动处理加载、类型转换和默认值。
+      
+      Example:
+      ```python
+      # BAD
+      import os
+      db_port = int(os.getenv("DB_PORT", 5432))
+      
+      # GOOD
+      from pydantic_settings import BaseSettings, SettingsConfigDict
+      
+      class Settings(BaseSettings):
+          db_port: int = 5432
+          api_key: str
+          model_config = SettingsConfigDict(env_file=".env")
+          
+      settings = Settings()
+      ```
+
   - title: "Pydantic 区分联合 (Discriminated Unions)"
     description: >
       在处理多态模型时，严禁通过继承覆写字段的方式来区分类型（这违反 LSP 原则）。
@@ -126,6 +149,6 @@ guidelines:
   - title: "所有命令使用 uv"
     description: >
       严禁使用 `pip` 或直接调用 `python`。
-      - 安装依赖: `uv add <package>`
+      - 安装依赖: `uv add <package>` (例如 `uv add pydantic-settings`)
       - 运行脚本: `uv run script.py`
       - 运行工具: `uv run pytest`
