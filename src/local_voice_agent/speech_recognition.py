@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from faster_whisper import WhisperModel
 from zhconv import convert  # 处理繁体简体转换
@@ -27,11 +26,11 @@ class SpeechRecognizer:
 
     def __init__(
         self,
-        model_size: Optional[str] = None,
-        device: Optional[str] = None,
-        compute_type: Optional[str] = None,
-        language: Optional[str] = None,
-        model_cache_dir: Optional[str] = None,
+        model_size: str | None = None,
+        device: str | None = None,
+        compute_type: str | None = None,
+        language: str | None = None,
+        model_cache_dir: str | Path | None = None,
     ):
         """
         初始化语音识别器
@@ -54,7 +53,9 @@ class SpeechRecognizer:
 
         # 模型下载路径
         base_cache_dir = (
-            Path(model_cache_dir) if model_cache_dir else PATH_CONFIG["model_cache_dir"]
+            Path(model_cache_dir)
+            if model_cache_dir
+            else PATH_CONFIG["model_cache_dir"]
         )
         self.model_path = base_cache_dir / "whisper"
         self.model_path.mkdir(parents=True, exist_ok=True)
@@ -78,8 +79,8 @@ class SpeechRecognizer:
             if simplified != text:
                 logger.info(f"繁简转换: {text} -> {simplified}")
             return simplified
-        except Exception as e:
-            logger.warning(f"繁简转换失败: {e}")
+        except Exception as exc:
+            logger.warning(f"繁简转换失败: {exc}")
             return text
 
     def load_model(self) -> bool:
@@ -99,11 +100,11 @@ class SpeechRecognizer:
             logger.info("Whisper模型加载成功")
             return True
 
-        except Exception as e:
-            logger.error(f"模型加载失败: {e}")
+        except Exception as exc:
+            logger.error(f"模型加载失败: {exc}")
             return False
 
-    def transcribe_audio_file(self, audio_file_path: str) -> Optional[str]:
+    def transcribe_audio_file(self, audio_file_path: str | Path) -> str | None:
         """
         转录音频文件
 
@@ -115,16 +116,15 @@ class SpeechRecognizer:
         """
 
         # 确保模型已加载
-        if self.model is None:
-            if not self.load_model():
-                return None
+        if self.model is None and not self.load_model():
+            return None
         if self.model is None:
             logger.error("模型未加载，无法进行转录")
             return None
 
         # 直接使用Whisper处理音频文件，支持多种格式
         segments, info = self.model.transcribe(
-            audio_file_path,
+            str(audio_file_path),
             language=self.language,
             beam_size=5,
             best_of=5,
@@ -137,11 +137,10 @@ class SpeechRecognizer:
             f"检测到语言: {info.language} (置信度: {info.language_probability:.2f})"
         )
 
-        # 合并所有段落的文本
-        full_text = ""
+        segment_texts: list[str] = []
         segment_count = 0
         for segment in segments:
-            full_text += segment.text
+            segment_texts.append(segment.text)
             segment_count += 1
             logger.debug(
                 f"段落 {segment_count}: [{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}"
@@ -150,7 +149,7 @@ class SpeechRecognizer:
         logger.info(f"转录完成，共 {segment_count} 个段落")
 
         # 清理文本并进行繁简转换
-        text = full_text.strip()
+        text = "".join(segment_texts).strip()
         if text:
             # 进行繁简转换
             simplified_text = self._convert_to_simplified(text)

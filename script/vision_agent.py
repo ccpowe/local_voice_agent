@@ -3,25 +3,30 @@ langchain 多模态图片输入
 """
 
 import base64
-import os
+from pathlib import Path
 
-from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
+from local_voice_agent.settings import Settings
 
-load_dotenv()
-model = ChatOpenAI(
-    model=os.getenv("MODEL_NAME"),  # type:ignore
-    api_key=os.getenv("API_KEY"),  # type:ignore
-    base_url=os.getenv("BASE_URL"),  # type:ignore
-)
+
+def _build_chat_model(settings: Settings) -> ChatOpenAI:
+    if settings.base_url:
+        return ChatOpenAI(
+            model_name=settings.model_name,
+            openai_api_key=settings.api_key,
+            openai_api_base=settings.base_url,
+        )
+    return ChatOpenAI(model_name=settings.model_name, openai_api_key=settings.api_key)
+
+
+model = _build_chat_model(Settings())
 
 
 # 读取本地图片文件
-def image_to_base64(image_path: str) -> str:
+def image_to_base64(image_path: str | Path) -> str:
     """将图片文件转换为 base64 字符串"""
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode("utf-8")
+    return base64.b64encode(Path(image_path).read_bytes()).decode("utf-8")
 
 
 # 使用图片文件

@@ -6,7 +6,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Final, List, Optional
+from typing import Final
 
 import numpy as np
 import soundfile as sf
@@ -33,11 +33,11 @@ class TextToSpeech:
 
     def __init__(
         self,
-        voice: Optional[str] = None,
-        speed: Optional[float] = None,
-        device: Optional[str] = None,
-        model_cache_dir: Optional[str] = None,
-        output_dir: Optional[str] = None,
+        voice: str | None = None,
+        speed: float | None = None,
+        device: str | None = None,
+        model_cache_dir: str | Path | None = None,
+        output_dir: str | Path | None = None,
     ):
         """
         初始化文本转语音器
@@ -55,9 +55,10 @@ class TextToSpeech:
         self.sample_rate: int = DEFAULT_SAMPLE_RATE
         self.silence_duration: float = DEFAULT_SILENCE_DURATION
         self.repo_id: str = DEFAULT_MODEL_REPO_ID
-        self.model_cache_dir: str | None = (
+        resolved_cache_dir = (
             str(Path(model_cache_dir).resolve()) if model_cache_dir else None
         )
+        self.model_cache_dir: str | None = resolved_cache_dir
         self._local_model_dir: Path | None = (
             Path(self.model_cache_dir) / "kokoro" / self.repo_id.replace("/", "--")
             if self.model_cache_dir
@@ -167,8 +168,8 @@ class TextToSpeech:
             logger.info("Kokoro TTS模型加载成功")
             return True
 
-        except Exception as e:
-            logger.error(f"TTS模型加载失败: {e}")
+        except Exception as exc:
+            logger.error(f"TTS模型加载失败: {exc}")
             return False
 
     def _calculate_speed(self, text_length: int) -> float:
@@ -213,7 +214,7 @@ class TextToSpeech:
         return text
 
     def _save_audio_file(
-        self, output_file: Optional[str], audio_data: np.ndarray
+        self, output_file: str | Path | None, audio_data: np.ndarray
     ) -> str:
         # 生成输出文件路径 （似乎能提取成一个）
         if output_file is None:
@@ -230,8 +231,8 @@ class TextToSpeech:
         return str(output_path)
 
     def synthesize_text(
-        self, text: str, output_file: Optional[str] = None
-    ) -> Optional[str]:
+        self, text: str, output_file: str | Path | None = None
+    ) -> str | None:
         """
         将文本转换为语音
 
@@ -266,13 +267,13 @@ class TextToSpeech:
             audio_output_path = self._save_audio_file(output_file, audio_data)
             return audio_output_path
 
-        except Exception as e:
-            logger.error(f"语音合成失败: {e}")
+        except Exception as exc:
+            logger.error(f"语音合成失败: {exc}")
             return None
 
     def synthesize_paragraphs(
-        self, paragraphs: List[str], output_file: Optional[str] = None
-    ) -> Optional[str]:
+        self, paragraphs: list[str], output_file: str | Path | None = None
+    ) -> str | None:
         """
         将多个段落转换为语音，段落之间插入静音
 
@@ -340,13 +341,13 @@ class TextToSpeech:
                 logger.warning("没有生成任何音频内容")
                 return None
 
-        except Exception as e:
-            logger.error(f"多段落语音合成失败: {e}")
+        except Exception as exc:
+            logger.error(f"多段落语音合成失败: {exc}")
             return None
 
     def synthesize_long_text(
-        self, text: str, max_chars: int = 150, output_file: Optional[str] = None
-    ) -> Optional[str]:
+        self, text: str, max_chars: int = 150, output_file: str | Path | None = None
+    ) -> str | None:
         """
         将长文本自动分割并转换为语音
 
@@ -380,11 +381,11 @@ class TextToSpeech:
                 # 文本较短，直接合成
                 return self.synthesize_text(processed_text, output_file)
 
-        except Exception as e:
-            logger.error(f"长文本合成失败: {e}")
+        except Exception as exc:
+            logger.error(f"长文本合成失败: {exc}")
             return None
 
-    def _split_long_text(self, text: str, max_chars: int = 150) -> List[str]:
+    def _split_long_text(self, text: str, max_chars: int = 150) -> list[str]:
         """
         将长文本按语义分割为合适长度的段落
 
@@ -455,7 +456,7 @@ class TextToSpeech:
 
         return final_segments
 
-    def get_available_voices(self) -> List[str]:
+    def get_available_voices(self) -> list[str]:
         """
         获取可用的语音列表
 

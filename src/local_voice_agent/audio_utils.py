@@ -5,12 +5,22 @@
 import io
 import logging
 import wave
-from typing import Optional
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
 
 logger = logging.getLogger(__name__)
+
+_PCM16_MAX = float(np.iinfo(np.int16).max)
+
+
+def _to_pcm16(audio_data: np.ndarray) -> np.ndarray:
+    if audio_data.dtype == np.int16:
+        return audio_data
+    if audio_data.dtype == np.float32:
+        return (audio_data * _PCM16_MAX).astype(np.int16)
+    return audio_data.astype(np.int16)
 
 
 class AudioRecorder:
@@ -24,17 +34,11 @@ class AudioRecorder:
         self.sample_rate = sample_rate
         self.channels = channels
 
-    def save_to_wav(self, audio_data: np.ndarray, filename: str) -> None:
+    def save_to_wav(self, audio_data: np.ndarray, filename: str | Path) -> None:
         """保存音频数据到WAV文件"""
-        # 确保音频数据是int16格式
-        if audio_data.dtype != np.int16:
-            # 如果是float32格式，需要转换
-            if audio_data.dtype == np.float32:
-                audio_data = (audio_data * 32767).astype(np.int16)
-            else:
-                audio_data = audio_data.astype(np.int16)
+        audio_data = _to_pcm16(audio_data)
 
-        with wave.open(filename, "wb") as wf:
+        with wave.open(str(Path(filename).resolve()), "wb") as wf:
             wf.setnchannels(self.channels)
             wf.setsampwidth(2)  # 16 bit
             wf.setframerate(self.sample_rate)
@@ -42,6 +46,7 @@ class AudioRecorder:
 
     def get_wav_bytes(self, audio_data: np.ndarray) -> bytes:
         """将音频数据转换为WAV格式的字节流"""
+        audio_data = _to_pcm16(audio_data)
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as wf:
             wf.setnchannels(self.channels)
@@ -50,7 +55,7 @@ class AudioRecorder:
             wf.writeframes(audio_data.tobytes())
         return buffer.getvalue()
 
-    def record_manual(self) -> Optional[np.ndarray]:
+    def record_manual(self) -> np.ndarray | None:
         """
         手动控制录音：按 Enter 开始，再按 Enter 停止。
 
@@ -85,7 +90,7 @@ class AudioRecorder:
             return None
 
         audio_float = np.concatenate(audio_chunks, axis=0)
-        audio_int16 = (audio_float * 32767).astype(np.int16).flatten()
+        audio_int16 = (audio_float * _PCM16_MAX).astype(np.int16).flatten()
         return audio_int16
 
 
@@ -99,14 +104,14 @@ class AudioPlayer:
         """播放音频数据"""
         # 确保音频数据是float32格式，范围在[-1, 1]
         if audio_data.dtype == np.int16:
-            audio_data = audio_data.astype(np.float32) / 32767.0
+            audio_data = audio_data.astype(np.float32) / _PCM16_MAX
 
         sd.play(audio_data, samplerate=self.sample_rate)
         sd.wait()  # 等待播放完成
 
-    def play_wav_file(self, filename: str) -> None:
+    def play_wav_file(self, filename: str | Path) -> None:
         """播放WAV文件"""
-        with wave.open(filename, "rb") as wf:
+        with wave.open(str(Path(filename).resolve()), "rb") as wf:
             frames = wf.readframes(wf.getnframes())
             audio_data = np.frombuffer(frames, dtype=np.int16)
             self.play_audio(audio_data)
