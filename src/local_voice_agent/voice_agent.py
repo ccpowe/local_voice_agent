@@ -83,7 +83,7 @@ async def _record_and_transcribe(
     print("\n🎤 语音输入模式")
     print("💡 操作说明: 按Enter开始录制，说话后再按Enter停止")
 
-    audio_data = audio_recorder.record_manual()
+    audio_data = await audio_recorder.record_manual_async()
     if audio_data is None:
         print("❌ 未录制到音频，请重试")
         return None

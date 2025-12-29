@@ -1,6 +1,8 @@
 """语音识别模块 - 基于faster-whisper"""
 
 import logging
+import os
+import sys
 from pathlib import Path
 
 from faster_whisper import WhisperModel
@@ -62,6 +64,30 @@ class SpeechRecognizer:
 
         logger.info(f"初始化语音识别器: 模型={self.model_size}, 设备={self.device}")
 
+    def _ensure_cudnn_library_path(self) -> None:
+        python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        cudnn_path = (
+            Path(sys.prefix)
+            / "lib"
+            / python_version
+            / "site-packages"
+            / "nvidia"
+            / "cudnn"
+            / "lib"
+        )
+        if not cudnn_path.is_dir():
+            return
+
+        existing = os.environ.get("LD_LIBRARY_PATH", "")
+        paths = [path for path in existing.split(":") if path]
+        if str(cudnn_path) in paths:
+            return
+
+        os.environ["LD_LIBRARY_PATH"] = (
+            f"{cudnn_path}:{existing}" if existing else str(cudnn_path)
+        )
+        logger.info(f"已自动添加 cuDNN 路径到 LD_LIBRARY_PATH: {cudnn_path}")
+
     def _convert_to_simplified(self, text: str) -> str:
         """
         将繁体中文转换为简体中文
@@ -85,6 +111,7 @@ class SpeechRecognizer:
 
     def load_model(self) -> bool:
         """加载Whisper模型"""
+        self._ensure_cudnn_library_path()
         try:
             logger.info(f"正在加载Whisper模型: {self.model_size}")
 
