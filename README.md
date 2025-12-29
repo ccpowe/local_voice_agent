@@ -95,7 +95,12 @@ Linux 可以通过 `--device /dev/snd` 直接访问声卡进行录音/播放。M
 原因：CPU 上不支持 `float16`。  
 解决：在 CPU 环境下自动降级为 `int8`，或确保容器可见 GPU。
 
-### 7) Whisper 运行时报错 `Unable to load any of {libcudnn_cnn.so...}`
+### 7) 容器内 TTS 播放无声
+现象：生成了 wav 文件，但容器内播放没有声音。  
+原因：Linux 桌面通常使用 PulseAudio，容器默认走 ALSA 输出可能无声。  
+解决：推荐将音频播放放到客户端（API 模式），或配置 PulseAudio 转发给容器。
+
+### 8) Whisper 运行时报错 `Unable to load any of {libcudnn_cnn.so...}`
 原因：本地运行时 CUDA/cuDNN 动态库路径未加入 `LD_LIBRARY_PATH`，导致 GPU 推理失败。  
 解决：将虚拟环境里的 cuDNN 路径加入环境变量，例如：
 ```bash

@@ -1,0 +1,30 @@
+services:
+  local-voice-agent:
+    build: .
+    image: local-voice-agent:latest
+    # 运行时环境变量
+    environment:
+      LVA_MODEL_NAME: ${LVA_MODEL_NAME}
+      LVA_API_KEY: ${LVA_API_KEY}
+      LVA_BASE_URL: ${LVA_BASE_URL:-}
+      # HuggingFace 模型缓存持久化目录
+      HF_HOME: /app/data/model/hf
+      HF_HUB_CACHE: /app/data/model/hf
+      TRANSFORMERS_CACHE: /app/data/model/hf
+      # NVIDIA 运行时配置（GPU）
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    # 持久化模型与输出数据
+    volumes:
+      - ./data:/app/data
+    # 让容器访问宿主机服务（Linux）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # 声卡设备映射（仅 Linux 桌面需要录音/播放时启用）
+    devices:
+      - /dev/snd:/dev/snd
+    # 允许容器使用 GPU
+    gpus: all
+    # 开启交互式终端
+    stdin_open: true
+    tty: true
