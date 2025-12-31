@@ -16,10 +16,10 @@ HTTP 位置 | URL (?key=val) | Request Payload (JSON)
 """
 
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Body, Cookie, FastAPI, Header, Path, Query
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
 app = FastAPI()
 
@@ -45,7 +45,7 @@ class ModelName(str, Enum):
 
 
 @app.get("/models/{model_name}")
-async def get_model(model_name: ModelName):
+async def get_model(model_name: ModelName) -> dict:
     match model_name:
         case ModelName.xue:
             return {"message": model_name}
@@ -169,12 +169,92 @@ async def update_item(item_id: int, item: Item, q: str | None = None):
 
 
 # Cookie参数 docs
+class Cookies(BaseModel):
+    session_id: str
+    fatebook_tracker: str | None = None
+    googall_tracker: str | None = None
+
+
 @app.get("/items_cookie/")
-async def read_items_cookie(ads_id: Annotated[str | None, Cookie()] = None):
+async def read_items_cookie(ads_id: Annotated[Cookies, Cookie()]):
     return {"ads_id": ads_id}
 
 
 # Header参数 docs
-@app.get("/items_header/")
-async def read_items_header(user_agent: Annotated[str | None, Header()] = None):
-    return {"User-Agent": user_agent}
+class CommonHeaders(BaseModel):
+    host: str
+    save_data: bool
+    if_modified_since: str | None = None
+    traceparent: str | None = None
+    x_tag: list[str] = []
+
+
+@app.get("/items/")
+async def read_items(headers: Annotated[CommonHeaders, Header()]):
+    return headers
+
+
+"""
+# Response Model - Return Type
+- 添加返回注释进行输出数据校验，可以是pydantic模型
+- 使用response_model= pydantic_model 进行字段匹配和数据过滤
+- 数据过滤也可以使用类和继承来利用函数类型注解
+- response_model_exclude_unset 过滤非显式设置的值
+"""
+
+
+# 函数直接类型注释,返回类型需要严格对应注释，否则报错
+@app.post("/items_return_type/")
+async def create_item_type(item: Item) -> Item:
+    return item
+
+
+@app.get("/items/")
+async def read_items_type() -> list[Item]:
+    return [
+        Item(name="Portal Gun", price=42.0),
+        Item(name="Plumbus", price=32.0),
+    ]
+
+
+# response_model 字段对应就ok,还能过滤字段,比返回类型优先级高
+@app.get("/items/", response_model=list[Item])
+async def read_items_response_model() -> Any:
+    return [
+        {"name": "Portal Gun", "price": 42.0},
+        {"name": "Plumbus", "price": 32.0},
+    ]
+
+
+class UserIn(BaseModel):
+    username: str
+    password: str
+    email: EmailStr
+    full_name: str | None = None
+
+
+class UserOut(BaseModel):
+    username: str
+    email: EmailStr
+    full_name: str | None = None
+
+
+@app.post("/user_response/", response_model=UserOut)
+async def create_user(user: UserIn) -> Any:
+    return user
+
+
+# 类与继承
+class BaseUser(BaseModel):
+    username: str
+    email: EmailStr
+    full_name: str | None = None
+
+
+class UserIn(BaseUser):
+    password: str
+
+
+@app.post("/user/")
+async def create_user_class(user: UserIn) -> BaseUser:
+    return user
