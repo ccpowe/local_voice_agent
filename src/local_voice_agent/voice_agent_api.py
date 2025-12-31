@@ -18,7 +18,7 @@ HTTP 位置 | URL (?key=val) | Request Payload (JSON)
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from fastapi import Body, Cookie, FastAPI, Header, Path, Query
+from fastapi import Body, Cookie, FastAPI, File, Form, Header, Path, Query, UploadFile
 from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
 app = FastAPI()
@@ -255,6 +255,40 @@ class UserIn(BaseUser):
     password: str
 
 
-@app.post("/user/")
+"status_code 状态吗"
+
+
+@app.post("/user/", status_code=201)
 async def create_user_class(user: UserIn) -> BaseUser:
     return user
+
+
+"""
+表单字段 From
+"""
+
+
+class FormData(BaseModel):
+    username: str
+    password: str
+    model_config = {"extra": "forbid"}
+
+
+@app.post("/login/")
+async def login(data: Annotated[FormData, Form()]):
+    return data
+
+
+"""
+请求文件
+"""
+
+
+@app.post("/files/")
+async def create_file(file: Annotated[bytes, File()]):
+    return {"file_size": len(file)}
+
+
+@app.post("/uploadfile/")
+async def create_upload_file(file: UploadFile):
+    return {"filename": file.filename}
